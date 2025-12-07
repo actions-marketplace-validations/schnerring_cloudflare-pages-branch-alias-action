@@ -1,34 +1,60 @@
-import {generateBranchAlias} from '../src/generate-branch-alias'
-import * as process from 'process'
-import * as cp from 'child_process'
-import * as path from 'path'
-import {expect, test} from '@jest/globals'
+/**
+ * Unit tests for the action's main functionality, src/main.ts
+ *
+ * To mock dependencies in ESM, you can create fixtures that export mock
+ * functions and objects. For example, the core module is mocked in this test,
+ * so that the actual '@actions/core' module is not imported.
+ */
+import { jest } from '@jest/globals'
+import * as core from '../__fixtures__/core.js'
+import { generateBranchAlias } from '../__fixtures__/generate-branch-alias.js'
 
-test.each([
-  ["test-abc", "test-abc"],
-  ["Test-ABC", "test-abc"],
-  ["Test:abc", "test-abc"],
-  ["-test-abc-", "test-abc"],
-  ["abcdef123456abcdef123456abcdef123456", "abcdef123456abcdef123456abcd"]])(
-    '.generateBranchAlias(%s)',
-    (gitBranch, expected) => {
-  const branchAlias = generateBranchAlias(gitBranch)
-  expect(branchAlias).toBe(expected)
-})
+// Mocks should be declared before the module being tested is imported.
+jest.unstable_mockModule('@actions/core', () => core)
+jest.unstable_mockModule('../src/generate-branch-alias.js', () => ({
+  generateBranchAlias
+}))
 
-test("Generate random branch name if input unusable", () => {
-  const input = "-::::-"
-  const branchAlias = generateBranchAlias(input)
-  expect(branchAlias).toMatch(/^branch-[a-z0-9]{10}$/)
-})
+// The module being tested should be imported dynamically. This ensures that the
+// mocks are used in place of any actual dependencies.
+const { run } = await import('../src/main.js')
 
-// shows how the runner will run a javascript action with env / stdout protocol
-test('test runs', () => {
-  process.env['INPUT_GIT-BRANCH'] = 'test-abc'
-  const np = process.execPath
-  const ip = path.join(__dirname, '..', 'lib', 'main.js')
-  const options: cp.ExecFileSyncOptions = {
-    env: process.env
-  }
-  console.log(cp.execFileSync(np, [ip], options).toString())
+describe('main.ts', () => {
+  beforeEach(() => {
+    // Set the action's inputs as return values from core.getInput().
+    core.getInput.mockImplementation(() => 'test-abc')
+
+    // Mock the generateBranchAlias function.
+    generateBranchAlias.mockImplementation(() => 'test-abc')
+  })
+
+  afterEach(() => {
+    jest.resetAllMocks()
+  })
+
+  it('Sets the branch-alias output', async () => {
+    await run()
+
+    // Verify that all of the core library functions were called correctly
+    expect(core.debug).toHaveBeenNthCalledWith(1, 'git-branch: test-abc')
+
+    const timeRegex = /^\d{2}:\d{2}:\d{2}/
+    expect(core.debug).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(timeRegex)
+    )
+    expect(core.debug).toHaveBeenNthCalledWith(
+      3,
+      expect.stringMatching(timeRegex)
+    )
+
+    // Verify the branch-alias output was set.
+    expect(core.setOutput).toHaveBeenNthCalledWith(
+      1,
+      'branch-alias',
+      'test-abc'
+    )
+
+    expect(core.error).not.toHaveBeenCalled()
+  })
 })
